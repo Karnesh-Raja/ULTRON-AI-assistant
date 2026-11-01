@@ -12,8 +12,6 @@ I am a first-year student exploring artificial intelligence, software developmen
 
 > ULTRON is described by its original creator as an open-source interface for an AI assistant. Learn more in the [original project write-up](https://sagartamang.com/projects/ultron) and [project post](https://x.com/sagar_builds/status/2077277583646101921).
 
-> [Watch the demo on Instagram](https://www.instagram.com/p/DayJ17OTwvx/)
-
 ![ULTRON orb UI](docs/screenshot.png)
 
 https://github.com/user-attachments/assets/91578a83-9a27-44e8-84b0-96defcfd7366
