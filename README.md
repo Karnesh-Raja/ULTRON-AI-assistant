@@ -10,8 +10,6 @@ ULTRON Orb UI is an Iron Man–inspired interactive holographic orb interface. I
 
 I am a first-year student exploring artificial intelligence, software development, and interactive interfaces. I prepared this project README to present the features and setup of the ULTRON Orb UI project as part of my learning. The original ULTRON project and its underlying work are credited to their respective creators; this interface should not be mistaken for an AI system created entirely by me.
 
-> ULTRON is described by its original creator as an open-source interface for an AI assistant. Learn more in the [original project write-up](https://sagartamang.com/projects/ultron) and [project post](https://x.com/sagar_builds/status/2077277583646101921).
-
 ![ULTRON orb UI](docs/screenshot.png)
 
 https://github.com/user-attachments/assets/91578a83-9a27-44e8-84b0-96defcfd7366
