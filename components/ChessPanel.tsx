@@ -348,7 +348,7 @@ export default function ChessPanel({ theme, onToggleTheme, onExit }: Props) {
         </div>
         <div className="cs-head-actions">
           <button type="button" className="cs-btn" onClick={onToggleTheme}>
-            {theme === "orange" ? "BLUE THEME" : "ORANGE THEME"}
+            CYCLE COLOR
           </button>
           <button type="button" className="cs-btn cs-exit" onClick={onExit} title="Back to ULTRON (Esc)">
             ✕ EXIT CHESS

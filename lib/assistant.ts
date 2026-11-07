@@ -50,6 +50,40 @@ export const getNotes = (s: KVStore) => readList<Note>(s, KEYS.notes);
 export const getTodos = (s: KVStore) => readList<Todo>(s, KEYS.todos);
 export const getTimers = (s: KVStore) => readList<TimerItem>(s, KEYS.timers);
 
+/** Agent tools use these narrow operations instead of accepting arbitrary storage keys. */
+export function createNote(s: KVStore, text: string, at = Date.now()): Note | null {
+  const clean = text.trim().slice(0, 2000);
+  if (!clean) return null;
+  const note = { id: newId(), text: clean, at };
+  writeList(s, KEYS.notes, [...getNotes(s), note]);
+  return note;
+}
+
+export function createTodo(s: KVStore, text: string, at = Date.now()): Todo | null {
+  const clean = text.trim().slice(0, 500);
+  if (!clean) return null;
+  const todo = { id: newId(), text: clean, done: false, at };
+  writeList(s, KEYS.todos, [...getTodos(s), todo]);
+  return todo;
+}
+
+export function completeTodo(s: KVStore, number: number): Todo | null {
+  const todos = getTodos(s);
+  const index = number - 1;
+  if (!Number.isInteger(number) || index < 0 || index >= todos.length) return null;
+  const completed = { ...todos[index], done: true };
+  writeList(s, KEYS.todos, todos.map((todo, i) => (i === index ? completed : todo)));
+  return completed;
+}
+
+export function createTimer(s: KVStore, durationText: string, label = "", nowMs = Date.now()): TimerItem | null {
+  const durationMs = parseDuration(durationText);
+  if (!durationMs || durationMs > MAX_TIMER_MS) return null;
+  const timer = { id: newId(), label: label.trim().slice(0, 300), endsAt: nowMs + durationMs, durationMs };
+  writeList(s, KEYS.timers, [...getTimers(s), timer]);
+  return timer;
+}
+
 export function toggleTodo(s: KVStore, id: string): void {
   writeList(s, KEYS.todos, getTodos(s).map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
 }

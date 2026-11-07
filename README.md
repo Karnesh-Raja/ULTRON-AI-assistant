@@ -71,6 +71,7 @@ Create `.env.local` from `.env.local.example` and add your `GEMINI_API_KEY`. Sta
 | **Project docs search** | “Search the docs for gestures” searches `README.md`, `/knowledge`, and `/docs`. |
 | **Conversation memory** | Ask a follow-up such as “Explain that with another example.” Say “Clear history” to reset. |
 | **Orb states** | Idle (amber), listening (blue), thinking (fast spin), speaking (pulses per word), error (red), and paused (dim). |
+| **Orb colors** | Choose orange, blue, violet, teal, or rose from the color menu beside the ULTRON title. |
 | **Gesture actions** | Hold an open palm for about one second to pause or resume. Swipe an open hand left or right to change panels. Zoom into the core, then hold three fingers up on your left hand and pinch with your right hand to show app shortcuts. Hold the right-hand pinch cursor over an icon for 4.5 seconds to open it. |
 
 Other shortcuts: `P` pause, `W` wake word, `G` gestures, `T` text panel, and `R` reset view.
@@ -88,6 +89,7 @@ Other shortcuts: `P` pause, `W` wake word, `G` gestures, `T` text panel, and `R`
 - **`lib/handTracker.ts`** — MediaPipe HandLandmarker runs on the webcam feed. One pinched hand spins the orb; two pinched hands zoom by moving apart or together.
 - **`components/JarvisOrb.tsx`** — HUD and connections between the scene, tracker, voice, chat memory, and user input.
 - **`lib/assistant.ts`** — Local command router for time, timers, notes, to-dos, websites, and documentation search.
+- **`app/api/agent/route.ts`** — Gemini function-calling endpoint with bounded tool steps for documentation search, time, notes, to-dos, and timers. Personal data tools execute in the current browser and keep using its local storage.
 - **`lib/wakeWord.ts`** — “Hey ULTRON” listener built on the Web Speech API.
 - **`app/api/chat/route.ts`** — Gemini proxy with model fallback and conversation history.
 - **`app/api/docs/route.ts`** — Keyword search over project documentation.

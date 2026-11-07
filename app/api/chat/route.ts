@@ -21,6 +21,7 @@ const SYSTEM_PROMPT = [
 const MAX_HISTORY = 20;
 const MAX_TEXT = 2000;
 const MAX_CONTEXT = 6000;
+const MODEL_TIMEOUT_MS = 12_000;
 
 type Turn = { role: "user" | "model"; parts: Array<{ text: string }> };
 
@@ -28,6 +29,44 @@ type GeminiData = {
   candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
   error?: { message?: string };
 };
+
+class ModelTimeoutError extends Error {
+  constructor() {
+    super("Gemini request timed out.");
+    this.name = "ModelTimeoutError";
+  }
+}
+
+/** Bound both the upstream request and response-body read for one model attempt. */
+async function requestModel(
+  model: string,
+  apiKey: string,
+  payload: Record<string, unknown>,
+): Promise<{ response: Response; data: GeminiData }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), MODEL_TIMEOUT_MS);
+  try {
+    const response = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
+        body: JSON.stringify(payload),
+        signal: controller.signal,
+      },
+    );
+    const data = (await response.json().catch((error: unknown) => {
+      if (controller.signal.aborted) throw error;
+      return {};
+    })) as GeminiData;
+    return { response, data };
+  } catch (error) {
+    if (controller.signal.aborted) throw new ModelTimeoutError();
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 /** Validate client history and turn it into Gemini "contents" (alternating, starts with user). */
 function buildContents(history: unknown, message: string): Turn[] {
@@ -62,7 +101,12 @@ export async function POST(request: Request) {
       );
     }
 
-    const body = (await request.json()) as { message?: unknown; history?: unknown; context?: unknown };
+    let body: { message?: unknown; history?: unknown; context?: unknown };
+    try {
+      body = (await request.json()) as typeof body;
+    } catch {
+      return NextResponse.json({ error: "Request body must be valid JSON." }, { status: 400 });
+    }
     const message = typeof body.message === "string" ? body.message.trim() : "";
     if (!message) return NextResponse.json({ error: "Please enter a message." }, { status: 400 });
     if (message.length > MAX_TEXT) {
@@ -81,23 +125,30 @@ export async function POST(request: Request) {
       : DEFAULT_MODELS;
 
     let lastError = "Gemini request failed.";
+    let lastStatus = 502;
 
     for (const model of models) {
-      const geminiResponse = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json", "x-goog-api-key": apiKey },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemText }] },
-            contents,
-            // Larger budget so newer "thinking" models still have room to answer.
-            generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
-          }),
-        },
-      );
-
-      const data = (await geminiResponse.json().catch(() => ({}))) as GeminiData;
+      let geminiResponse: Response;
+      let data: GeminiData;
+      try {
+        ({ response: geminiResponse, data } = await requestModel(model, apiKey, {
+          systemInstruction: { parts: [{ text: systemText }] },
+          contents,
+          // Larger budget so newer "thinking" models still have room to answer.
+          generationConfig: { temperature: 0.7, maxOutputTokens: 1024 },
+        }));
+      } catch (error) {
+        if (error instanceof ModelTimeoutError) {
+          lastError = `${model} timed out after ${MODEL_TIMEOUT_MS / 1000} seconds.`;
+          lastStatus = 504;
+          console.warn(`[chat] ${lastError}`);
+          continue;
+        }
+        lastError = `${model} could not be reached.`;
+        lastStatus = 502;
+        console.error(`[chat] ${model} request failed:`, error);
+        continue;
+      }
 
       if (geminiResponse.ok) {
         const reply = data.candidates?.[0]?.content?.parts
@@ -110,16 +161,24 @@ export async function POST(request: Request) {
       }
 
       lastError = data.error?.message || `${model} failed (${geminiResponse.status}).`;
+      lastStatus = geminiResponse.status === 504 ? 504 : 502;
       console.error(`[chat] ${model} -> ${geminiResponse.status}: ${lastError}`);
 
-      // Model missing / quota used up / overloaded: try the next model.
-      if ([404, 429, 500, 503].includes(geminiResponse.status)) continue;
+      // Model missing, unavailable, overloaded, or timed out: try the next model.
+      if ([404, 429, 500, 503, 504].includes(geminiResponse.status)) continue;
 
       // Anything else (e.g. 400 or 403 for a bad API key) will fail on every model.
       return NextResponse.json({ error: lastError }, { status: 502 });
     }
 
-    return NextResponse.json({ error: lastError }, { status: 502 });
+    return NextResponse.json(
+      {
+        error: lastStatus === 504
+          ? "The AI service took too long to respond. Please try again."
+          : lastError,
+      },
+      { status: lastStatus },
+    );
   } catch {
     return NextResponse.json({ error: "Could not process the request. Check your connection and try again." }, { status: 500 });
   }

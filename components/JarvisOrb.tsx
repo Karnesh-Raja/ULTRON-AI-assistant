@@ -10,6 +10,10 @@ import { beep } from "@/lib/audio";
 import { APP_SHORTCUTS, findSite } from "@/lib/sites";
 import {
   browserStore,
+  completeTodo,
+  createNote,
+  createTimer,
+  createTodo,
   formatClock,
   formatDuration,
   getNotes,
@@ -44,6 +48,17 @@ interface DocHit {
   score: number;
 }
 
+interface AgentContent {
+  role: "user" | "model";
+  parts: Array<Record<string, unknown>>;
+}
+
+interface AgentToolCall {
+  name?: string;
+  id?: string;
+  args?: unknown;
+}
+
 const MODE_LABEL: Record<TrackerStatus["mode"], string> = {
   idle: "STANDBY",
   spin: "SPIN",
@@ -60,6 +75,13 @@ const STATE_LABEL: Record<OrbState, string> = {
 };
 
 const PANELS: PanelId[] = ["chat", "tasks", "docs", "study", "chess"];
+const THEME_OPTIONS: Array<{ id: OrbTheme; label: string; color: string }> = [
+  { id: "orange", label: "Orange", color: "#ffad32" },
+  { id: "blue", label: "Blue", color: "#42d8ff" },
+  { id: "violet", label: "Violet", color: "#bd8cff" },
+  { id: "teal", label: "Teal", color: "#4ff0ce" },
+  { id: "rose", label: "Rose", color: "#ff78bd" },
+];
 const HISTORY_KEY = "ultron.history";
 const MAX_STORED_MESSAGES = 60;
 const MAX_SENT_MESSAGES = 12;
@@ -274,17 +296,154 @@ export default function JarvisOrb() {
 
   /* ───────────── asking ULTRON ───────────── */
 
+  const executeAgentTool = useCallback(async (call: AgentToolCall): Promise<Record<string, unknown>> => {
+    const args = call.args && typeof call.args === "object" && !Array.isArray(call.args)
+      ? call.args as Record<string, unknown>
+      : {};
+    const textArg = (name: string, max = 500) =>
+      typeof args[name] === "string" ? (args[name] as string).trim().slice(0, max) : "";
+
+    switch (call.name) {
+      case "get_time": {
+        const now = new Date();
+        return { time: now.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }), date: now.toLocaleDateString([], { weekday: "long", year: "numeric", month: "long", day: "numeric" }) };
+      }
+      case "search_project_docs": {
+        const query = textArg("query", 200);
+        if (!query) return { error: "A search query is required." };
+        const response = await fetch(`/api/docs?q=${encodeURIComponent(query)}`);
+        const data = await response.json().catch(() => ({})) as { results?: DocHit[]; files?: string[] };
+        if (!response.ok) return { error: "Project documentation search failed." };
+        const hits = (data.results ?? []).slice(0, 5);
+        setDocQuery(query);
+        setDocHits(hits);
+        setDocFiles(data.files?.length ?? 0);
+        panelRef.current = "docs";
+        setPanel("docs");
+        return { filesSearched: data.files?.length ?? 0, results: hits.map(({ file, heading, snippet }) => ({ file, heading, snippet })) };
+      }
+      case "create_note": {
+        const note = createNote(browserStore, textArg("text", 2000));
+        if (!note) return { error: "The note was empty." };
+        refreshData();
+        panelRef.current = "tasks";
+        setPanel("tasks");
+        return { saved: true, text: note.text, createdAt: note.at };
+      }
+      case "list_notes":
+        return { notes: getNotes(browserStore).slice(-10).map(({ text, at }) => ({ text: text.slice(0, 500), at })) };
+      case "add_todo": {
+        const todo = createTodo(browserStore, textArg("text"));
+        if (!todo) return { error: "The to-do was empty." };
+        refreshData();
+        panelRef.current = "tasks";
+        setPanel("tasks");
+        return { added: true, text: todo.text };
+      }
+      case "list_todos":
+        return { todos: getTodos(browserStore).slice(0, 30).map(({ text, done }, index) => ({ number: index + 1, text: text.slice(0, 300), done })) };
+      case "complete_todo": {
+        const number = typeof args.number === "number" ? args.number : Number.NaN;
+        const todo = completeTodo(browserStore, number);
+        if (!todo) return { error: "No to-do exists with that number." };
+        refreshData();
+        panelRef.current = "tasks";
+        setPanel("tasks");
+        return { completed: true, text: todo.text };
+      }
+      case "set_timer": {
+        const timer = createTimer(browserStore, textArg("duration", 100), textArg("label", 300));
+        if (!timer) return { error: "That duration is invalid or longer than 24 hours." };
+        refreshData();
+        panelRef.current = "tasks";
+        setPanel("tasks");
+        return { set: true, label: timer.label, durationMs: timer.durationMs, endsAt: timer.endsAt };
+      }
+      case "list_timers":
+        return { timers: getTimers(browserStore).slice(0, 20).map(({ label, durationMs, endsAt }) => ({ label, durationMs, endsAt })) };
+      default:
+        return { error: "This tool is not available." };
+    }
+  }, [refreshData]);
+
+  const callAgent = useCallback(async (message: string, history: ChatMessage[]) => {
+    const contents: AgentContent[] = [];
+    for (const item of history.slice(-MAX_SENT_MESSAGES)) {
+      const text = item.text.trim().slice(0, 2000);
+      if (!text) continue;
+      const role = item.role === "user" ? "user" : "model";
+      const last = contents[contents.length - 1];
+      if (last?.role === role && typeof last.parts[0]?.text === "string") {
+        last.parts[0].text = `${last.parts[0].text as string}\n${text}`;
+      } else {
+        contents.push({ role, parts: [{ text }] });
+      }
+    }
+    while (contents.length && contents[0].role !== "user") contents.shift();
+    contents.push({ role: "user", parts: [{ text: message.slice(0, 2000) }] });
+
+    const controller = new AbortController();
+    const overallTimeout = window.setTimeout(() => controller.abort(), 90_000);
+    let toolCount = 0;
+    try {
+      for (let round = 0; round < 4; round++) {
+        const response = await fetch("/api/agent", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ contents }),
+          signal: controller.signal,
+        });
+        const data = await response.json().catch(() => ({})) as {
+          reply?: string;
+          error?: string;
+          modelContent?: AgentContent;
+          toolCalls?: AgentToolCall[];
+        };
+        if (!response.ok) throw new Error(data.error || "ULTRON could not respond.");
+        const calls = data.toolCalls ?? [];
+        if (!calls.length) {
+          const answer = data.reply?.trim();
+          if (!answer) throw new Error("ULTRON returned an empty response.");
+          return answer;
+        }
+        if (!data.modelContent || data.modelContent.role !== "model" || !Array.isArray(data.modelContent.parts)) {
+          throw new Error("ULTRON received an invalid tool request.");
+        }
+        toolCount += calls.length;
+        if (toolCount > 8) throw new Error("ULTRON reached the tool-call limit for this request.");
+        contents.push(data.modelContent);
+        const functionResponses: Array<Record<string, unknown>> = [];
+        for (const call of calls) {
+          const name = call.name ?? "";
+          const result = await executeAgentTool(call);
+          functionResponses.push({ functionResponse: {
+            name,
+            ...(call.id ? { id: call.id } : {}),
+            response: result,
+          } });
+        }
+        contents.push({ role: "user", parts: functionResponses });
+      }
+      throw new Error("ULTRON reached the maximum number of agent steps.");
+    } catch (error) {
+      if (controller.signal.aborted) throw new Error("ULTRON's agent request timed out. Please try again.");
+      throw error;
+    } finally {
+      window.clearTimeout(overallTimeout);
+    }
+  }, [executeAgentTool]);
+
   const callChat = useCallback(async (message: string, history: ChatMessage[], context?: string) => {
     const response = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         message,
-        history: history.slice(-MAX_SENT_MESSAGES).map((m) => ({ role: m.role, text: m.text })),
+        history: history.slice(-MAX_SENT_MESSAGES).map((item) => ({ role: item.role, text: item.text })),
         context,
       }),
     });
-    const data = (await response.json().catch(() => ({}))) as { reply?: string; error?: string };
+    const data = await response.json().catch(() => ({})) as { reply?: string; error?: string };
     if (!response.ok) throw new Error(data.error || "ULTRON could not respond.");
     const answer = data.reply?.trim();
     if (!answer) throw new Error("ULTRON returned an empty response.");
@@ -441,7 +600,7 @@ export default function JarvisOrb() {
           return;
         }
         setThinking(true);
-        const answer = await callChat(text, historyBefore);
+        const answer = await callAgent(text, historyBefore);
         pushMessage("assistant", answer);
         speak(answer);
       } catch (err) {
@@ -455,7 +614,7 @@ export default function JarvisOrb() {
         busyRef.current = false;
       }
     },
-    [applyLocal, callChat, flashError, pushMessage, speak],
+    [applyLocal, callAgent, flashError, pushMessage, speak],
   );
 
   useEffect(() => {
@@ -709,7 +868,10 @@ export default function JarvisOrb() {
         showToast(`SWIPE ${direction.toUpperCase()} · ${next.toUpperCase()}`);
       },
       onSixFingerGesture: () => {
-        setOrbTheme((current) => (current === "orange" ? "blue" : "orange"));
+        setOrbTheme((current) => {
+          const currentIndex = THEME_OPTIONS.findIndex((option) => option.id === current);
+          return THEME_OPTIONS[(currentIndex + 1) % THEME_OPTIONS.length].id;
+        });
         showToast("SIX FINGERS · ORB THEME");
       },
       onAppLauncherGesture: () => {
@@ -886,14 +1048,29 @@ export default function JarvisOrb() {
       <div className="overlay-scanlines" />
 
       <div className="hud hud-title">U.L.T.R.O.N.</div>
-      <button
-        type="button"
-        className="hud hud-theme-toggle"
-        aria-label={orbTheme === "orange" ? "Switch to blue theme" : "Switch to orange theme"}
-        onClick={() => setOrbTheme((current) => (current === "orange" ? "blue" : "orange"))}
-      >
-        {orbTheme === "orange" ? "BLUE THEME" : "ORANGE THEME"}
-      </button>
+      <details className="hud hud-theme-picker">
+        <summary aria-label={`Choose orb color; current color is ${THEME_OPTIONS.find((option) => option.id === orbTheme)?.label}`}>
+          <span className="theme-indicator" style={{ "--swatch-color": THEME_OPTIONS.find((option) => option.id === orbTheme)?.color } as React.CSSProperties} />
+          COLOR · {THEME_OPTIONS.find((option) => option.id === orbTheme)?.label.toUpperCase()}
+        </summary>
+        <div className="theme-menu" role="group" aria-label="Orb color">
+          {THEME_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              className="theme-swatch"
+              style={{ "--swatch-color": option.color } as React.CSSProperties}
+              aria-label={`Use ${option.label} color`}
+              aria-pressed={orbTheme === option.id}
+              title={option.label}
+              onClick={(event) => {
+                setOrbTheme(option.id);
+                event.currentTarget.closest("details")?.removeAttribute("open");
+              }}
+            />
+          ))}
+        </div>
+      </details>
 
       <div className="hud hud-status" data-state={orbState} aria-live="polite">
         <span className="state-dot" />
@@ -1148,7 +1325,10 @@ export default function JarvisOrb() {
       {chessMode && (
         <ChessPanel
           theme={orbTheme}
-          onToggleTheme={() => setOrbTheme((current) => (current === "orange" ? "blue" : "orange"))}
+          onToggleTheme={() => setOrbTheme((current) => {
+            const currentIndex = THEME_OPTIONS.findIndex((option) => option.id === current);
+            return THEME_OPTIONS[(currentIndex + 1) % THEME_OPTIONS.length].id;
+          })}
           onExit={exitChess}
         />
       )}
@@ -1177,13 +1357,6 @@ export default function JarvisOrb() {
             disabled={listening || thinking || paused}
           >
             {listening ? "LISTENING…" : "MIC INPUT"}
-          </button>
-          <button
-            type="button"
-            className="hud-btn"
-            onClick={() => speak("Hello, sir. ULTRON systems are online. How may I assist you today?")}
-          >
-            TEST VOICE
           </button>
           <button type="button" className="hud-btn" onClick={cancelSpeech}>
             STOP VOICE
@@ -1216,7 +1389,7 @@ export default function JarvisOrb() {
             −
           </button>
           <button type="button" className="hud-btn" onClick={() => sceneRef.current?.resetView()}>
-            RESET
+            RESET VIEW
           </button>
         </div>
       </div>

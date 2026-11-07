@@ -6,7 +6,13 @@ import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js"
 import { ShaderPass } from "three/addons/postprocessing/ShaderPass.js";
 
 export type OrbState = "idle" | "listening" | "thinking" | "speaking" | "error" | "paused";
-export type OrbTheme = "orange" | "blue";
+export type OrbTheme = "orange" | "blue" | "violet" | "teal" | "rose";
+const THEME_HUE_SHIFT: Record<Exclude<OrbTheme, "orange">, number> = {
+  blue: 0.46,
+  violet: 0.62,
+  teal: 0.30,
+  rose: 0.82,
+};
 
 export interface OrbSceneApi {
   /** Switch the orb's behaviour/animation (eases smoothly between states). */
@@ -745,9 +751,9 @@ export function createOrbScene(container: HTMLElement): OrbSceneApi {
       } else {
         const hsl = { h: 0, s: 0, l: 0 };
         baseColor.getHSL(hsl);
-        // Leave neutral whites/grays alone and shift the warm orb palette to electric cyan-blue.
+        // Keep neutral whites/grays unchanged while shifting the warm orb palette.
         if (hsl.s > 0.08) {
-          colored.color.setHSL((hsl.h + 0.46) % 1, Math.min(1, hsl.s * 1.08), hsl.l);
+          colored.color.setHSL((hsl.h + THEME_HUE_SHIFT[theme]) % 1, Math.min(1, hsl.s * 1.08), hsl.l);
         } else {
           colored.color.copy(baseColor);
         }
