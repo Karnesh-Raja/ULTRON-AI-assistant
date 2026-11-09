@@ -7,4 +7,10 @@ CREATE TABLE IF NOT EXISTS public.ultron_google_accounts (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON public.ultron_google_accounts TO ultron_app;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ultron_app') THEN
+    EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON public.ultron_google_accounts TO ultron_app';
+  END IF;
+END
+$$;

@@ -2,8 +2,14 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ULTRON Orb UI",
-  description: "An Iron Man-inspired holographic orb built with Three.js and Next.js",
+  applicationName: "ULTRON",
+  title: "ULTRON — Personal Assistant",
+  description: "Your personal AI assistant.",
+  manifest: "/manifest.webmanifest",
+  icons: {
+    icon: "/icon.svg",
+    apple: "/apple-icon.png",
+  },
 };
 
 export const viewport: Viewport = {

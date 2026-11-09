@@ -4,6 +4,8 @@
 # next.js
 /.next/
 /out/
+/.netlify/
+/.vercel/
 
 # production
 /build
@@ -38,3 +40,6 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+
+.vercel
+.env*
