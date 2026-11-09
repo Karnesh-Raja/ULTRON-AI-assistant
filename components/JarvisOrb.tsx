@@ -47,6 +47,15 @@ interface DocHit {
   snippet: string;
   score: number;
 }
+interface MemoryRecord {
+  id: string;
+  content: string;
+  category: string;
+  tags: string[];
+  source: "user" | "agent";
+  createdAt: string;
+  updatedAt: string;
+}
 
 interface AgentContent {
   role: "user" | "model";
@@ -74,7 +83,7 @@ const STATE_LABEL: Record<OrbState, string> = {
   paused: "PAUSED",
 };
 
-const PANELS: PanelId[] = ["chat", "tasks", "docs", "study", "chess"];
+const PANELS: PanelId[] = ["chat", "tasks", "docs", "memory", "study", "chess"];
 const THEME_OPTIONS: Array<{ id: OrbTheme; label: string; color: string }> = [
   { id: "orange", label: "Orange", color: "#ffad32" },
   { id: "blue", label: "Blue", color: "#42d8ff" },
@@ -85,6 +94,7 @@ const THEME_OPTIONS: Array<{ id: OrbTheme; label: string; color: string }> = [
 const HISTORY_KEY = "ultron.history";
 const MAX_STORED_MESSAGES = 60;
 const MAX_SENT_MESSAGES = 12;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const APP_ICON_POSITIONS = [
   [18, 30], [39, 18], [61, 18], [82, 30],
   [18, 69], [39, 82], [61, 82], [82, 69],
@@ -166,6 +176,10 @@ export default function JarvisOrb() {
   const [docHits, setDocHits] = useState<DocHit[]>([]);
   const [docQuery, setDocQuery] = useState("");
   const [docFiles, setDocFiles] = useState<number | null>(null);
+  const [memories, setMemories] = useState<MemoryRecord[]>([]);
+  const [memoryDraft, setMemoryDraft] = useState("");
+  const [memoryLoading, setMemoryLoading] = useState(false);
+  const [memoryError, setMemoryError] = useState<string | null>(null);
   const [pendingLink, setPendingLink] = useState<{ url: string; label: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [studyFen, setStudyFen] = useState("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
@@ -225,6 +239,21 @@ export default function JarvisOrb() {
     setNotes(getNotes(browserStore));
     setTodos(getTodos(browserStore));
     setTimers(t);
+  }, []);
+
+  const refreshMemories = useCallback(async () => {
+    setMemoryLoading(true);
+    setMemoryError(null);
+    try {
+      const response = await fetch("/api/memories", { cache: "no-store" });
+      const data = await response.json().catch(() => ({})) as { memories?: MemoryRecord[]; error?: string };
+      if (!response.ok) throw new Error(data.error || "Memory storage could not be reached.");
+      setMemories(data.memories ?? []);
+    } catch (error) {
+      setMemoryError(error instanceof Error ? error.message : "Memory storage could not be reached.");
+    } finally {
+      setMemoryLoading(false);
+    }
   }, []);
 
   /* ───────────── speaking (system voice - no API key) ───────────── */
@@ -361,6 +390,44 @@ export default function JarvisOrb() {
       }
       case "list_timers":
         return { timers: getTimers(browserStore).slice(0, 20).map(({ label, durationMs, endsAt }) => ({ label, durationMs, endsAt })) };
+      case "remember_information": {
+        const content = textArg("content", 2000);
+        if (!content) return { error: "Memory content is required." };
+        const category = textArg("category", 20);
+        const tags = Array.isArray(args.tags)
+          ? args.tags.filter((tag): tag is string => typeof tag === "string").slice(0, 10)
+          : [];
+        const response = await fetch("/api/memories", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content, category, tags, source: "agent" }),
+        });
+        const data = await response.json().catch(() => ({})) as { memory?: MemoryRecord; error?: string };
+        if (!response.ok || !data.memory) return { error: data.error || "Memory could not be saved." };
+        setMemories((current) => [data.memory!, ...current.filter((item) => item.id !== data.memory!.id)]);
+        return { saved: true, id: data.memory.id, content: data.memory.content, category: data.memory.category };
+      }
+      case "search_memories": {
+        const query = textArg("query", 160);
+        if (!query) return { error: "A memory search phrase is required." };
+        const response = await fetch(`/api/memories?q=${encodeURIComponent(query)}`, { cache: "no-store" });
+        const data = await response.json().catch(() => ({})) as { memories?: MemoryRecord[]; error?: string };
+        if (!response.ok) return { error: data.error || "Saved memories could not be searched." };
+        return { matches: (data.memories ?? []).slice(0, 5).map(({ id, content, category, tags }) => ({ id, content, category, tags })) };
+      }
+      case "forget_memory": {
+        const id = textArg("id", 36);
+        if (!UUID_PATTERN.test(id)) return { error: "A specific saved memory ID is required." };
+        const response = await fetch("/api/memories", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id }),
+        });
+        const data = await response.json().catch(() => ({})) as { deleted?: boolean; error?: string };
+        if (!response.ok) return { error: data.error || "Memory could not be deleted." };
+        setMemories((current) => current.filter((item) => item.id !== id));
+        return { deleted: data.deleted === true };
+      }
       default:
         return { error: "This tool is not available." };
     }
@@ -838,6 +905,10 @@ export default function JarvisOrb() {
       .catch(() => setDocFiles(0));
   }, [panel, docFiles]);
 
+  useEffect(() => {
+    if (panel === "memory") void refreshMemories();
+  }, [panel, refreshMemories]);
+
   /* ───────────── hand gestures ───────────── */
 
   const stopGestures = useCallback(() => {
@@ -1280,6 +1351,81 @@ export default function JarvisOrb() {
                 </div>
                 <div className="doc-snippet">{h.snippet}</div>
               </div>
+            ))}
+          </div>
+        )}
+
+        {panel === "memory" && (
+          <div className="panel-body memory-panel">
+            <div className="list-heading">LONG-TERM MEMORY</div>
+            <p className="panel-empty">ULTRON saves a memory only when you ask. It searches these memories when they may help answer you.</p>
+            <form
+              className="memory-form"
+              onSubmit={async (event) => {
+                event.preventDefault();
+                const content = memoryDraft.trim();
+                if (!content) return;
+                setMemoryError(null);
+                try {
+                  const response = await fetch("/api/memories", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ content, category: "general", source: "user" }),
+                  });
+                  const data = await response.json().catch(() => ({})) as { memory?: MemoryRecord; error?: string };
+                  if (!response.ok || !data.memory) throw new Error(data.error || "Memory could not be saved.");
+                  setMemories((current) => [data.memory!, ...current.filter((item) => item.id !== data.memory!.id)]);
+                  setMemoryDraft("");
+                } catch (error) {
+                  setMemoryError(error instanceof Error ? error.message : "Memory could not be saved.");
+                }
+              }}
+            >
+              <textarea
+                className="voice-input memory-input"
+                value={memoryDraft}
+                onChange={(event) => setMemoryDraft(event.target.value.slice(0, 2000))}
+                placeholder="What should ULTRON remember?"
+                aria-label="Memory to save"
+                maxLength={2000}
+                rows={2}
+              />
+              <button type="submit" className="hud-btn" disabled={!memoryDraft.trim()}>SAVE MEMORY</button>
+            </form>
+            {memoryError && <div className="memory-error" role="status">{memoryError}</div>}
+            {memoryLoading && <div className="panel-empty">Loading saved memories…</div>}
+            {!memoryLoading && !memoryError && memories.length === 0 && <div className="panel-empty">No saved memories yet.</div>}
+            {memories.map((memory) => (
+              <article className="memory-card" key={memory.id}>
+                <div className="memory-card-meta">
+                  <span>{memory.category.toUpperCase()}</span>
+                  <time dateTime={memory.updatedAt}>{new Date(memory.updatedAt).toLocaleDateString()}</time>
+                </div>
+                <p>{memory.content}</p>
+                {memory.tags.length > 0 && <div className="memory-tags">{memory.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>}
+                <button
+                  type="button"
+                  className="mini-btn memory-delete"
+                  onClick={async () => {
+                    if (!window.confirm("Permanently forget this memory?")) return;
+                    setMemoryError(null);
+                    try {
+                      const response = await fetch("/api/memories", {
+                        method: "DELETE",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ id: memory.id }),
+                      });
+                      const data = await response.json().catch(() => ({})) as { error?: string };
+                      if (!response.ok) throw new Error(data.error || "Memory could not be deleted.");
+                      setMemories((current) => current.filter((item) => item.id !== memory.id));
+                    } catch (error) {
+                      setMemoryError(error instanceof Error ? error.message : "Memory could not be deleted.");
+                    }
+                  }}
+                >
+                  FORGET
+                </button>
+              </article>
             ))}
           </div>
         )}

@@ -438,6 +438,22 @@ body {
   scrollbar-color: rgba(255, 170, 48, 0.4) transparent;
 }
 .panel-empty { color: rgba(255, 224, 173, 0.55); font-size: 12px; margin: 4px 0 8px; }
+.memory-form { display: grid; gap: 6px; margin: 8px 0 12px; }
+.memory-input { min-height: 58px; padding: 8px 9px; resize: vertical; line-height: 1.4; }
+.memory-error { margin: 6px 0; color: #ff8e7b; font-size: 11px; }
+.memory-card {
+  position: relative;
+  margin: 8px 0;
+  padding: 9px 9px 34px;
+  border: 1px solid rgba(255, 170, 48, 0.26);
+  border-radius: 4px;
+  background: rgba(20, 10, 0, 0.38);
+}
+.memory-card-meta { display: flex; justify-content: space-between; gap: 8px; margin-bottom: 5px; color: rgba(255, 204, 102, 0.78); font: 9px "Courier New", monospace; letter-spacing: 0.1em; }
+.memory-card p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.memory-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.memory-tags span { padding: 2px 5px; border: 1px solid rgba(255, 170, 48, 0.2); border-radius: 10px; color: rgba(255, 224, 173, 0.72); font: 9px Arial, sans-serif; }
+.memory-delete { position: absolute; right: 8px; bottom: 7px; height: 22px; }
 .msg { display: flex; gap: 8px; margin-bottom: 8px; }
 .msg-who {
   flex: none;
@@ -699,6 +715,9 @@ body {
   color: #5ce4ff;
 }
 .app-shell[data-theme="blue"] .mini-btn:hover:not(:disabled) { border-color: #8cecff; color: #8cecff; }
+.app-shell[data-theme="blue"] .memory-card { border-color: rgba(52, 202, 255, 0.3); background: rgba(0, 18, 34, 0.45); }
+.app-shell[data-theme="blue"] .memory-card-meta { color: rgba(140, 236, 255, 0.82); }
+.app-shell[data-theme="blue"] .memory-tags span { border-color: rgba(52, 202, 255, 0.25); color: rgba(212, 248, 255, 0.75); }
 .app-shell[data-theme="blue"] .list-date { color: rgba(212, 248, 255, 0.5); }
 .app-shell[data-theme="blue"] .doc-hit {
   border-color: rgba(52, 202, 255, 0.3);
@@ -824,6 +843,9 @@ body {
   border-color: rgba(var(--theme-rgb), 0.25);
   background: rgba(var(--theme-deep-rgb), 0.5);
 }
+:is(.app-shell[data-theme="violet"], .app-shell[data-theme="teal"], .app-shell[data-theme="rose"]) .memory-card { border-color: rgba(var(--theme-rgb), 0.28); background: rgba(var(--theme-deep-rgb), 0.45); }
+:is(.app-shell[data-theme="violet"], .app-shell[data-theme="teal"], .app-shell[data-theme="rose"]) .memory-card-meta { color: var(--theme-strong); }
+:is(.app-shell[data-theme="violet"], .app-shell[data-theme="teal"], .app-shell[data-theme="rose"]) .memory-tags span { border-color: rgba(var(--theme-rgb), 0.25); color: var(--theme-strong); }
 :is(.app-shell[data-theme="violet"], .app-shell[data-theme="teal"], .app-shell[data-theme="rose"]) .doc-snippet { color: #eee9f5; }
 :is(.app-shell[data-theme="violet"], .app-shell[data-theme="teal"], .app-shell[data-theme="rose"]) .hud-status,
 :is(.app-shell[data-theme="violet"], .app-shell[data-theme="teal"], .app-shell[data-theme="rose"]) .hud-timer { color: var(--theme-strong); }

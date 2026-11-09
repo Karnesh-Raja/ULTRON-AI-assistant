@@ -17,6 +17,8 @@ const MAX_BODY_BYTES = 64_000;
 const SYSTEM_PROMPT = [
   "You are ULTRON, a personal AI assistant.",
   "Use the available tools for time, notes, to-dos, timers, and project documentation when relevant.",
+  "Long-term memories are private. Save one only when the user explicitly asks you to remember or save it, and never store passwords, API keys, or access tokens.",
+  "Search stored memories only when they are relevant to the current request. Forget a memory only when the user clearly asks and you have identified the exact matching item; ask if the match is ambiguous.",
   "Never claim a tool action succeeded until you receive its result.",
   "Ask a brief follow-up when required information is missing or ambiguous.",
   "The tools only work in the user's current browser and do not access other applications.",
@@ -34,6 +36,9 @@ const TOOLS = [{
     { name: "complete_todo", description: "Mark a to-do item complete using its displayed one-based number.", parameters: { type: "OBJECT", properties: { number: { type: "INTEGER", description: "The displayed to-do number." } }, required: ["number"] } },
     { name: "set_timer", description: "Set a timer of up to 24 hours in this browser. Use a duration such as '5 minutes' and optionally a reminder label.", parameters: { type: "OBJECT", properties: { duration: { type: "STRING", description: "Timer duration, such as '5 minutes' or '1 hour 30 minutes'." }, label: { type: "STRING", description: "Optional reason for the reminder." } }, required: ["duration"] } },
     { name: "list_timers", description: "List active timers in this browser.", parameters: { type: "OBJECT", properties: {} } },
+    { name: "remember_information", description: "Save a useful long-term memory in ULTRON's PostgreSQL storage. Call only when the user explicitly asks ULTRON to remember or save the information. Never save credentials.", parameters: { type: "OBJECT", properties: { content: { type: "STRING", description: "A concise fact or preference the user explicitly asked to remember." }, category: { type: "STRING", enum: ["preference", "personal", "project", "routine", "general"] }, tags: { type: "ARRAY", items: { type: "STRING" }, description: "A few short retrieval tags." } }, required: ["content"] } },
+    { name: "search_memories", description: "Search the user's saved long-term memories for information relevant to the request.", parameters: { type: "OBJECT", properties: { query: { type: "STRING", description: "A concise search phrase." } }, required: ["query"] } },
+    { name: "forget_memory", description: "Permanently delete one saved memory by its exact ID. Use only after the user clearly asks to forget it and search_memories identifies the exact match.", parameters: { type: "OBJECT", properties: { id: { type: "STRING", description: "Exact ID of the memory to delete." } }, required: ["id"] } },
   ],
 }];
 

@@ -67,6 +67,7 @@ Create `.env.local` from `.env.local.example` and add your `GEMINI_API_KEY`. Sta
 | **Open apps and websites** | “Open WhatsApp,” “Open Spotify,” or “Search for python decorators on YouTube.” Supported sites are listed in `lib/sites.ts`. |
 | **Project docs search** | “Search the docs for gestures” searches `README.md`, `/knowledge`, and `/docs`. |
 | **Conversation memory** | Ask a follow-up such as “Explain that with another example.” Say “Clear history” to reset. |
+| **Long-term memory** | Ask ULTRON to remember a preference or useful fact. Open the **MEMORY** panel to review or forget saved items. Memory is stored in PostgreSQL, not browser storage. |
 | **Orb states** | Idle (amber), listening (blue), thinking (fast spin), speaking (pulses per word), error (red), and paused (dim). |
 | **Orb colors** | Choose orange, blue, violet, teal, or rose from the color menu beside the ULTRON title. |
 | **Gesture actions** | Hold an open palm for about one second to pause or resume. Swipe an open hand left or right to change panels. Zoom into the core, then hold three fingers up on your left hand and pinch with your right hand to show app shortcuts. Hold the right-hand pinch cursor over an icon for 4.5 seconds to open it. |
@@ -77,7 +78,8 @@ Other shortcuts: `P` pause, `W` wake word, `G` gestures, `T` text panel, and `R`
 
 - Wake word detection uses browser speech recognition. It works in Chrome and Edge, needs internet access, and requires the tab to stay open; it is not an offline always-on hot-word engine.
 - Voice commands open supported web versions of apps in a new tab. A browser cannot launch arbitrary installed desktop apps. Add web shortcuts in `lib/sites.ts` to support more web apps.
-- Notes, to-dos, timers, and chat history are stored in this browser's `localStorage`. Timers stop if the tab is closed.
+- Notes, to-dos, timers, and chat history are stored in this browser's `localStorage`. Timers stop if the tab is closed. Long-term memories use PostgreSQL when database credentials and the schema migration are configured.
+- This local PostgreSQL setup is for development on this computer. Multi-device access requires hosting ULTRON's backend and database securely; the app must never connect directly to PostgreSQL.
 - Documentation search checks only `README.md`, `/knowledge`, and `/docs` in the project. It uses keyword matching rather than semantic search.
 
 ## How it works
@@ -86,9 +88,22 @@ Other shortcuts: `P` pause, `W` wake word, `G` gestures, `T` text panel, and `R`
 - **`lib/handTracker.ts`** — MediaPipe HandLandmarker runs on the webcam feed. One pinched hand spins the orb; two pinched hands zoom by moving apart or together.
 - **`components/JarvisOrb.tsx`** — HUD and connections between the scene, tracker, voice, chat memory, and user input.
 - **`lib/assistant.ts`** — Local command router for time, timers, notes, to-dos, websites, and documentation search.
-- **`app/api/agent/route.ts`** — Gemini function-calling endpoint with bounded tool steps for documentation search, time, notes, to-dos, and timers. Personal data tools execute in the current browser and keep using its local storage.
+- **`app/api/agent/route.ts`** — Gemini function-calling endpoint with bounded tool steps for documentation search, time, notes, to-dos, timers, and PostgreSQL long-term memory. Notes, to-dos, and timers still use the current browser's local storage.
+- **`app/api/memories/route.ts`** — Read, search, create, update, and forget long-term memory records in PostgreSQL.
+- **`lib/server/database.ts`** — Reused server-side PostgreSQL connection pool; database credentials stay out of browser code.
+- **`db/migrations/0001_create_memories.sql`** — Creates the memory table, search index, and least-privilege runtime grants.
 - **`lib/wakeWord.ts`** — “Hey ULTRON” listener built on the Web Speech API.
 - **`app/api/chat/route.ts`** — Gemini proxy with model fallback and conversation history.
+
+### PostgreSQL memory setup
+
+Put the runtime and migration connection URLs in the ignored `.env.local` file. Use the `ultron_app` account for `DATABASE_URL` and `ultron_migrator` for `DATABASE_MIGRATION_URL`. URL-encode special characters in each password. Then apply the schema once:
+
+```bash
+npm run db:migrate
+```
+
+Keep the local PostgreSQL server on `localhost`; do not expose port 5432 to the public internet. For multi-device sync, deploy a protected ULTRON backend with authentication and a hosted PostgreSQL database.
 - **`app/api/docs/route.ts`** — Keyword search over project documentation.
 
 ## Updates in this build

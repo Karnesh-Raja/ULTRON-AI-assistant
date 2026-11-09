@@ -5,11 +5,13 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "db:migrate": "node scripts/db-migrate.mjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.35",
     "next": "^16.2.10",
+    "pg": "^8.23.1",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "three": "^0.185.1"
@@ -17,6 +19,7 @@
   "devDependencies": {
     "@playwright/test": "^1.65.0",
     "@types/node": "^24",
+    "@types/pg": "^8.23.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/three": "^0.185.0",
