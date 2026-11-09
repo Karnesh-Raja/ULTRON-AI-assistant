@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDatabasePool } from "@/lib/server/database";
+import { getSignedInEmail } from "@/lib/server/session";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -41,14 +42,14 @@ function storageUnavailable() {
   return NextResponse.json({ error: "Memory storage is unavailable. Check the local PostgreSQL connection and run the database migration." }, { status: 503 });
 }
 
-function localOnly(request: Request) {
-  const host = request.headers.get("host") ?? "";
-  if (/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/i.test(host)) return null;
-  return NextResponse.json({ error: "Long-term memory is available only through ULTRON on this computer." }, { status: 403 });
+async function requireSignedIn() {
+  return await getSignedInEmail()
+    ? null
+    : NextResponse.json({ error: "Sign in to use ULTRON." }, { status: 401 });
 }
 
 export async function GET(request: Request) {
-  const accessError = localOnly(request);
+  const accessError = await requireSignedIn();
   if (accessError) return accessError;
   if (!process.env.DATABASE_URL) return storageUnavailable();
   const query = new URL(request.url).searchParams.get("q")?.trim().slice(0, 160) ?? "";
@@ -58,9 +59,8 @@ export async function GET(request: Request) {
               created_at AS "createdAt", updated_at AS "updatedAt"
        FROM public.ultron_memories
        WHERE $1 = '' OR
-         to_tsvector('simple', content || ' ' || category || ' ' || array_to_string(tags, ' '))
-           @@ plainto_tsquery('simple', $1)
-         OR content ILIKE $2
+         to_tsvector('simple'::regconfig, content) @@ plainto_tsquery('simple'::regconfig, $1)
+         OR content ILIKE $2 OR category ILIKE $2 OR array_to_string(tags, ' ') ILIKE $2
        ORDER BY updated_at DESC
        LIMIT 100`,
       [query, `%${query}%`],
@@ -72,7 +72,7 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const accessError = localOnly(request);
+  const accessError = await requireSignedIn();
   if (accessError) return accessError;
   if (!process.env.DATABASE_URL) return storageUnavailable();
   const body = await readBody(request);
@@ -102,7 +102,7 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const accessError = localOnly(request);
+  const accessError = await requireSignedIn();
   if (accessError) return accessError;
   if (!process.env.DATABASE_URL) return storageUnavailable();
   const body = await readBody(request);
@@ -131,7 +131,7 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const accessError = localOnly(request);
+  const accessError = await requireSignedIn();
   if (accessError) return accessError;
   if (!process.env.DATABASE_URL) return storageUnavailable();
   const body = await readBody(request);

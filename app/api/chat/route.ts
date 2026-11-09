@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getSignedInEmail } from "@/lib/server/session";
 
 export const runtime = "nodejs";
 
@@ -92,6 +93,7 @@ function buildContents(history: unknown, message: string): Turn[] {
 }
 
 export async function POST(request: Request) {
+  if (!await getSignedInEmail()) return NextResponse.json({ error: "Sign in to use ULTRON." }, { status: 401 });
   try {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) {

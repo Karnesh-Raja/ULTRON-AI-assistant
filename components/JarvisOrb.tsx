@@ -1,6 +1,7 @@
 "use client";
 
 import ChessPanel from "./ChessPanel";
+import { signIn, signOut } from "next-auth/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createOrbScene, type OrbSceneApi, type OrbState, type OrbTheme } from "@/lib/orbScene";
 import { HandTracker, type TrackerStatus } from "@/lib/handTracker";
@@ -56,6 +57,10 @@ interface MemoryRecord {
   createdAt: string;
   updatedAt: string;
 }
+interface PendingApproval {
+  action: "send email" | "create calendar event";
+  details: string;
+}
 
 interface AgentContent {
   role: "user" | "model";
@@ -83,7 +88,7 @@ const STATE_LABEL: Record<OrbState, string> = {
   paused: "PAUSED",
 };
 
-const PANELS: PanelId[] = ["chat", "tasks", "docs", "memory", "study", "chess"];
+const PANELS: PanelId[] = ["chat", "tasks", "docs", "memory", "integrations", "study", "chess"];
 const THEME_OPTIONS: Array<{ id: OrbTheme; label: string; color: string }> = [
   { id: "orange", label: "Orange", color: "#ffad32" },
   { id: "blue", label: "Blue", color: "#42d8ff" },
@@ -122,7 +127,7 @@ function splitForSpeech(text: string, max = 220): string[] {
   );
 }
 
-export default function JarvisOrb() {
+export default function JarvisOrb({ userEmail }: { userEmail: string }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const overlayRef = useRef<HTMLCanvasElement>(null);
@@ -149,6 +154,7 @@ export default function JarvisOrb() {
   const firstPauseRef = useRef(true);
   const mountedRef = useRef(true);
   const appPointerRef = useRef<{ x: number; y: number } | null>(null);
+  const approvalResolverRef = useRef<((approved: boolean) => void) | null>(null);
 
   const [camera, setCamera] = useState<CameraState>("off");
   const [status, setStatus] = useState<TrackerStatus>({ hands: 0, mode: "idle", palm: 0 });
@@ -180,6 +186,10 @@ export default function JarvisOrb() {
   const [memoryDraft, setMemoryDraft] = useState("");
   const [memoryLoading, setMemoryLoading] = useState(false);
   const [memoryError, setMemoryError] = useState<string | null>(null);
+  const [integrationStatus, setIntegrationStatus] = useState<{ connected: boolean; scopes: string[] } | null>(null);
+  const [integrationLoading, setIntegrationLoading] = useState(false);
+  const [integrationError, setIntegrationError] = useState<string | null>(null);
+  const [pendingApproval, setPendingApproval] = useState<PendingApproval | null>(null);
   const [pendingLink, setPendingLink] = useState<{ url: string; label: string } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [studyFen, setStudyFen] = useState("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1");
@@ -188,6 +198,8 @@ export default function JarvisOrb() {
     mountedRef.current = true;
     return () => {
       mountedRef.current = false;
+      approvalResolverRef.current?.(false);
+      approvalResolverRef.current = null;
       trackerRef.current?.stop();
       trackerRef.current = null;
     };
@@ -253,6 +265,32 @@ export default function JarvisOrb() {
       setMemoryError(error instanceof Error ? error.message : "Memory storage could not be reached.");
     } finally {
       setMemoryLoading(false);
+    }
+  }, []);
+
+  const requestAgentApproval = useCallback((approval: PendingApproval) => new Promise<boolean>((resolve) => {
+    approvalResolverRef.current = resolve;
+    setPendingApproval(approval);
+  }), []);
+
+  const finishAgentApproval = useCallback((approved: boolean) => {
+    approvalResolverRef.current?.(approved);
+    approvalResolverRef.current = null;
+    setPendingApproval(null);
+  }, []);
+
+  const refreshIntegrationStatus = useCallback(async () => {
+    setIntegrationLoading(true);
+    setIntegrationError(null);
+    try {
+      const response = await fetch("/api/integrations/google", { cache: "no-store" });
+      const data = await response.json().catch(() => ({})) as { connected?: boolean; scopes?: string[]; error?: string };
+      if (!response.ok) throw new Error(data.error || "Google connection status is unavailable.");
+      setIntegrationStatus({ connected: data.connected === true, scopes: data.scopes ?? [] });
+    } catch (error) {
+      setIntegrationError(error instanceof Error ? error.message : "Google connection status is unavailable.");
+    } finally {
+      setIntegrationLoading(false);
     }
   }, []);
 
@@ -428,10 +466,69 @@ export default function JarvisOrb() {
         setMemories((current) => current.filter((item) => item.id !== id));
         return { deleted: data.deleted === true };
       }
+      case "search_gmail": {
+        const query = textArg("query", 200);
+        if (!query) return { error: "A Gmail search query is required." };
+        const response = await fetch(`/api/integrations/gmail?q=${encodeURIComponent(query)}`, { cache: "no-store" });
+        const data = await response.json().catch(() => ({})) as { messages?: Array<Record<string, unknown>>; error?: string };
+        if (!response.ok) return { error: data.error || "Gmail search failed." };
+        return { messages: data.messages ?? [] };
+      }
+      case "get_calendar_events": {
+        const params = new URLSearchParams();
+        const from = textArg("from", 80);
+        const to = textArg("to", 80);
+        if (from) params.set("from", from);
+        if (to) params.set("to", to);
+        const response = await fetch(`/api/integrations/calendar?${params.toString()}`, { cache: "no-store" });
+        const data = await response.json().catch(() => ({})) as { events?: Array<Record<string, unknown>>; error?: string };
+        if (!response.ok) return { error: data.error || "Calendar could not be read." };
+        return { events: data.events ?? [] };
+      }
+      case "send_gmail": {
+        const to = textArg("to", 254);
+        const subject = textArg("subject", 240);
+        const body = textArg("body", 8000);
+        if (!to || !subject || !body) return { error: "The recipient, subject, and email body are required." };
+        const approved = await requestAgentApproval({
+          action: "send email",
+          details: `To: ${to}\nSubject: ${subject}\n\n${body}`,
+        });
+        if (!approved) return { sent: false, approved: false, reason: "The user declined this email." };
+        const response = await fetch("/api/integrations/gmail", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ to, subject, body }),
+        });
+        const data = await response.json().catch(() => ({})) as { sent?: boolean; error?: string; id?: string };
+        if (!response.ok) return { error: data.error || "Email could not be sent." };
+        return { sent: data.sent === true, id: data.id };
+      }
+      case "create_calendar_event": {
+        const title = textArg("title", 200);
+        const start = textArg("start", 80);
+        const end = textArg("end", 80);
+        const description = textArg("description", 2000);
+        const timeZone = textArg("timeZone", 80) || Intl.DateTimeFormat().resolvedOptions().timeZone;
+        if (!title || !start || !end) return { error: "The event title, start, and end times are required." };
+        const approved = await requestAgentApproval({
+          action: "create calendar event",
+          details: `Title: ${title}\nStart: ${start}\nEnd: ${end}\nTime zone: ${timeZone}${description ? `\n\nDetails: ${description}` : ""}`,
+        });
+        if (!approved) return { created: false, approved: false, reason: "The user declined this calendar event." };
+        const response = await fetch("/api/integrations/calendar", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ title, start, end, description, timeZone }),
+        });
+        const data = await response.json().catch(() => ({})) as { created?: boolean; error?: string; id?: string; htmlLink?: string };
+        if (!response.ok) return { error: data.error || "Calendar event could not be created." };
+        return { created: data.created === true, id: data.id, link: data.htmlLink };
+      }
       default:
         return { error: "This tool is not available." };
     }
-  }, [refreshData]);
+  }, [refreshData, requestAgentApproval]);
 
   const callAgent = useCallback(async (message: string, history: ChatMessage[]) => {
     const contents: AgentContent[] = [];
@@ -909,6 +1006,10 @@ export default function JarvisOrb() {
     if (panel === "memory") void refreshMemories();
   }, [panel, refreshMemories]);
 
+  useEffect(() => {
+    if (panel === "integrations") void refreshIntegrationStatus();
+  }, [panel, refreshIntegrationStatus]);
+
   /* ───────────── hand gestures ───────────── */
 
   const stopGestures = useCallback(() => {
@@ -1162,6 +1263,22 @@ export default function JarvisOrb() {
 
       {toast && <div className="hud hud-toast">{toast}</div>}
       {paused && <div className="hud hud-paused">PAUSED · HOLD OPEN PALM OR PRESS P TO RESUME</div>}
+
+      {pendingApproval && (
+        <div className="action-approval-backdrop" role="presentation">
+          <section className="action-approval" role="alertdialog" aria-modal="true" aria-labelledby="action-approval-title">
+            <div className="list-heading" id="action-approval-title">CONFIRM {pendingApproval.action.toUpperCase()}</div>
+            <p className="action-approval-note">Review these exact details. ULTRON will continue only if you approve.</p>
+            <pre className="action-approval-details">{pendingApproval.details}</pre>
+            <div className="action-approval-buttons">
+              <button type="button" className="hud-btn" onClick={() => finishAgentApproval(false)}>CANCEL</button>
+              <button type="button" className="hud-btn action-approve" onClick={() => finishAgentApproval(true)}>
+                {pendingApproval.action === "send email" ? "APPROVE & SEND" : "APPROVE & CREATE"}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
 
       <div className="hud hud-hint">
         <div>
@@ -1427,6 +1544,51 @@ export default function JarvisOrb() {
                 </button>
               </article>
             ))}
+          </div>
+        )}
+
+        {panel === "integrations" && (
+          <div className="panel-body integration-panel">
+            <div className="list-heading">CONNECTED APPLICATIONS</div>
+            <p className="panel-empty">Google access is limited to this allowlisted account. ULTRON searches only when you ask. Matching mail excerpts and calendar details may be sent to Gemini to answer you. Email sending and event creation always require your approval.</p>
+            <div className="integration-account">
+              <span>ULTRON ACCOUNT</span>
+              <strong>{userEmail}</strong>
+            </div>
+            {integrationLoading && <div className="panel-empty">Checking Google connection…</div>}
+            {integrationError && <div className="memory-error" role="status">{integrationError}</div>}
+            {!integrationLoading && !integrationError && (
+              <div className="integration-account">
+                <span>GOOGLE SERVICES</span>
+                <strong>{integrationStatus?.connected ? "CONNECTED" : "NOT CONNECTED"}</strong>
+                {integrationStatus?.connected && (
+                  <small>{integrationStatus.scopes.includes("https://www.googleapis.com/auth/gmail.readonly") ? "Gmail read" : "Gmail unavailable"} · {integrationStatus.scopes.includes("https://www.googleapis.com/auth/gmail.send") ? "Gmail send" : "Sending unavailable"} · {integrationStatus.scopes.includes("https://www.googleapis.com/auth/calendar.events.owned") ? "Calendar events" : "Calendar unavailable"}</small>
+                )}
+              </div>
+            )}
+            {!integrationStatus?.connected ? (
+              <button type="button" className="hud-btn" onClick={() => void signIn("google", { callbackUrl: "/" })}>CONNECT GOOGLE ACCOUNT</button>
+            ) : (
+              <button
+                type="button"
+                className="hud-btn integration-disconnect"
+                onClick={async () => {
+                  if (!window.confirm("Disconnect ULTRON from Gmail and Calendar and revoke its saved Google access?")) return;
+                  setIntegrationError(null);
+                  try {
+                    const response = await fetch("/api/integrations/google", { method: "DELETE" });
+                    const data = await response.json().catch(() => ({})) as { error?: string };
+                    if (!response.ok) throw new Error(data.error || "Google could not be disconnected.");
+                    await signOut({ callbackUrl: "/" });
+                  } catch (error) {
+                    setIntegrationError(error instanceof Error ? error.message : "Google could not be disconnected.");
+                  }
+                }}
+              >
+                DISCONNECT GOOGLE
+              </button>
+            )}
+            <button type="button" className="mini-btn integration-signout" onClick={() => void signOut({ callbackUrl: "/" })}>LOCK ULTRON</button>
           </div>
         )}
 

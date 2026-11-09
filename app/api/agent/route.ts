@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getSignedInEmail } from "@/lib/server/session";
 
 export const runtime = "nodejs";
 
@@ -17,11 +18,13 @@ const MAX_BODY_BYTES = 64_000;
 const SYSTEM_PROMPT = [
   "You are ULTRON, a personal AI assistant.",
   "Use the available tools for time, notes, to-dos, timers, and project documentation when relevant.",
+  "Use Gmail and Calendar tools only when the user asks for them. Search only the specific information requested; relevant mail excerpts and calendar details are sent to Gemini to answer the user's request.",
+  "Sending email and creating calendar events always require the user to approve the exact details in ULTRON's confirmation dialog. If approval is denied, do not retry or claim the action happened.",
   "Long-term memories are private. Save one only when the user explicitly asks you to remember or save it, and never store passwords, API keys, or access tokens.",
   "Search stored memories only when they are relevant to the current request. Forget a memory only when the user clearly asks and you have identified the exact matching item; ask if the match is ambiguous.",
   "Never claim a tool action succeeded until you receive its result.",
   "Ask a brief follow-up when required information is missing or ambiguous.",
-  "The tools only work in the user's current browser and do not access other applications.",
+  "Tools access only the user's browser-local notes, tasks, timers, PostgreSQL memories, project files, and Google services explicitly connected through OAuth.",
   "Keep answers clear and concise for voice playback.",
 ].join(" ");
 
@@ -39,6 +42,10 @@ const TOOLS = [{
     { name: "remember_information", description: "Save a useful long-term memory in ULTRON's PostgreSQL storage. Call only when the user explicitly asks ULTRON to remember or save the information. Never save credentials.", parameters: { type: "OBJECT", properties: { content: { type: "STRING", description: "A concise fact or preference the user explicitly asked to remember." }, category: { type: "STRING", enum: ["preference", "personal", "project", "routine", "general"] }, tags: { type: "ARRAY", items: { type: "STRING" }, description: "A few short retrieval tags." } }, required: ["content"] } },
     { name: "search_memories", description: "Search the user's saved long-term memories for information relevant to the request.", parameters: { type: "OBJECT", properties: { query: { type: "STRING", description: "A concise search phrase." } }, required: ["query"] } },
     { name: "forget_memory", description: "Permanently delete one saved memory by its exact ID. Use only after the user clearly asks to forget it and search_memories identifies the exact match.", parameters: { type: "OBJECT", properties: { id: { type: "STRING", description: "Exact ID of the memory to delete." } }, required: ["id"] } },
+    { name: "search_gmail", description: "Search the user's Gmail for the specific messages they asked about. Returns at most five relevant excerpts; those excerpts are sent to Gemini to answer the request.", parameters: { type: "OBJECT", properties: { query: { type: "STRING", description: "A Gmail search query, such as from:person@example.com subject:invoice newer_than:30d." } }, required: ["query"] } },
+    { name: "get_calendar_events", description: "List the user's Calendar events within a requested date range. If no range is supplied, uses the next seven days. Relevant event details are sent to Gemini to answer the request.", parameters: { type: "OBJECT", properties: { from: { type: "STRING", description: "Optional ISO start date-time." }, to: { type: "STRING", description: "Optional ISO end date-time." } } } },
+    { name: "send_gmail", description: "Send an email only after the app shows the exact recipient, subject, and body and the user approves it.", parameters: { type: "OBJECT", properties: { to: { type: "STRING", description: "Recipient email address." }, subject: { type: "STRING", description: "Email subject." }, body: { type: "STRING", description: "Email body." } }, required: ["to", "subject", "body"] } },
+    { name: "create_calendar_event", description: "Create a timed Calendar event only after the app shows its exact title, start, end, and description and the user approves it.", parameters: { type: "OBJECT", properties: { title: { type: "STRING", description: "Event title." }, start: { type: "STRING", description: "Start time as an ISO date-time with timezone." }, end: { type: "STRING", description: "End time as an ISO date-time with timezone." }, description: { type: "STRING", description: "Optional event details." }, timeZone: { type: "STRING", description: "Optional IANA time zone, such as Asia/Kolkata." } }, required: ["title", "start", "end"] } },
   ],
 }];
 
@@ -154,6 +161,7 @@ async function requestModel(model: string, apiKey: string, payload: Record<strin
 }
 
 export async function POST(request: Request) {
+  if (!await getSignedInEmail()) return NextResponse.json({ error: "Sign in to use ULTRON." }, { status: 401 });
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) return NextResponse.json({ error: "GEMINI_API_KEY is missing. Add it to .env.local and restart the server." }, { status: 500 });
 

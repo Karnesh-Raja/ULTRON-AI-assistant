@@ -17,10 +17,13 @@ https://github.com/user-attachments/assets/91578a83-9a27-44e8-84b0-96defcfd7366
 
 ## Getting started
 
-Install the dependencies and start the development server:
+Install the dependencies, copy `.env.local.example` to `.env.local`, and fill in its values privately. Never commit `.env.local` or paste its contents into chat. The Google Cloud OAuth setup is described below.
+
+For local PostgreSQL, apply the local schema using the migration account, then start the development server:
 
 ```bash
 npm install
+npm run db:migrate
 npm run dev
 ```
 
@@ -68,6 +71,7 @@ Create `.env.local` from `.env.local.example` and add your `GEMINI_API_KEY`. Sta
 | **Project docs search** | “Search the docs for gestures” searches `README.md`, `/knowledge`, and `/docs`. |
 | **Conversation memory** | Ask a follow-up such as “Explain that with another example.” Say “Clear history” to reset. |
 | **Long-term memory** | Ask ULTRON to remember a preference or useful fact. Open the **MEMORY** panel to review or forget saved items. Memory is stored in PostgreSQL, not browser storage. |
+| **Gmail and Calendar** | Connect the allowlisted Google account from **INTEGRATIONS**. Ask ULTRON to search requested email or events. It asks you to approve each email send and each new calendar event. |
 | **Orb states** | Idle (amber), listening (blue), thinking (fast spin), speaking (pulses per word), error (red), and paused (dim). |
 | **Orb colors** | Choose orange, blue, violet, teal, or rose from the color menu beside the ULTRON title. |
 | **Gesture actions** | Hold an open palm for about one second to pause or resume. Swipe an open hand left or right to change panels. Zoom into the core, then hold three fingers up on your left hand and pinch with your right hand to show app shortcuts. Hold the right-hand pinch cursor over an icon for 4.5 seconds to open it. |
@@ -79,7 +83,11 @@ Other shortcuts: `P` pause, `W` wake word, `G` gestures, `T` text panel, and `R`
 - Wake word detection uses browser speech recognition. It works in Chrome and Edge, needs internet access, and requires the tab to stay open; it is not an offline always-on hot-word engine.
 - Voice commands open supported web versions of apps in a new tab. A browser cannot launch arbitrary installed desktop apps. Add web shortcuts in `lib/sites.ts` to support more web apps.
 - Notes, to-dos, timers, and chat history are stored in this browser's `localStorage`. Timers stop if the tab is closed. Long-term memories use PostgreSQL when database credentials and the schema migration are configured.
-- This local PostgreSQL setup is for development on this computer. Multi-device access requires hosting ULTRON's backend and database securely; the app must never connect directly to PostgreSQL.
+- Notes, to-dos, timers, and chat history still live in each browser. Long-term memories and encrypted Google refresh tokens live in PostgreSQL.
+- Gmail excerpts and Calendar event details are sent to Gemini only when you ask ULTRON to use those integrations. Attachments are not read. ULTRON never sends email or creates a Calendar event without your approval of the exact details.
+- Google OAuth uses a single allowlisted account and requests Gmail read/send plus access to events on calendars you own. Keep the Google OAuth app in Testing for personal use; add your account as a test user. Google documents limited refresh-token lifetime in Testing mode, so you may need to reconnect periodically.
+- The local PostgreSQL server is only for local development. The hosted Netlify app uses Netlify Database; existing local memory rows are not copied automatically.
+- The Netlify project is private behind team login. On a phone, sign into your Netlify account in the browser, then open the deployed ULTRON URL. This is a responsive web app, not a native mobile app.
 - Documentation search checks only `README.md`, `/knowledge`, and `/docs` in the project. It uses keyword matching rather than semantic search.
 
 ## How it works
@@ -88,22 +96,39 @@ Other shortcuts: `P` pause, `W` wake word, `G` gestures, `T` text panel, and `R`
 - **`lib/handTracker.ts`** — MediaPipe HandLandmarker runs on the webcam feed. One pinched hand spins the orb; two pinched hands zoom by moving apart or together.
 - **`components/JarvisOrb.tsx`** — HUD and connections between the scene, tracker, voice, chat memory, and user input.
 - **`lib/assistant.ts`** — Local command router for time, timers, notes, to-dos, websites, and documentation search.
-- **`app/api/agent/route.ts`** — Gemini function-calling endpoint with bounded tool steps for documentation search, time, notes, to-dos, timers, and PostgreSQL long-term memory. Notes, to-dos, and timers still use the current browser's local storage.
+- **`app/api/agent/route.ts`** — Authenticated Gemini function-calling endpoint with bounded tools for local tasks, documentation, PostgreSQL memory, Gmail, and Calendar.
 - **`app/api/memories/route.ts`** — Read, search, create, update, and forget long-term memory records in PostgreSQL.
-- **`lib/server/database.ts`** — Reused server-side PostgreSQL connection pool; database credentials stay out of browser code.
+- **`lib/server/auth.ts`** — Allowlisted Google sign-in; app sessions never expose OAuth tokens to browser JavaScript.
+- **`lib/server/google.ts`** — Gmail/Calendar API calls and AES-GCM encryption for refresh tokens stored in PostgreSQL.
+- **`lib/server/database.ts`** — Reused PostgreSQL connection pool using local `DATABASE_URL` or the Netlify Database connection.
 - **`db/migrations/0001_create_memories.sql`** — Creates the memory table, search index, and least-privilege runtime grants.
+- **`netlify/database/migrations/`** — Netlify applies the hosted database schema migrations during deployment.
 - **`lib/wakeWord.ts`** — “Hey ULTRON” listener built on the Web Speech API.
 - **`app/api/chat/route.ts`** — Gemini proxy with model fallback and conversation history.
 
-### PostgreSQL memory setup
+### Local PostgreSQL and Google OAuth setup
 
-Put the runtime and migration connection URLs in the ignored `.env.local` file. Use the `ultron_app` account for `DATABASE_URL` and `ultron_migrator` for `DATABASE_MIGRATION_URL`. URL-encode special characters in each password. Then apply the schema once:
+Put local PostgreSQL URLs and OAuth values in ignored `.env.local`. Use `ultron_app` for `DATABASE_URL` and `ultron_migrator` for `DATABASE_MIGRATION_URL`. URL-encode special characters in passwords. Generate a random `NEXTAUTH_SECRET` of at least 32 characters; do not reuse your Gemini key or PostgreSQL password.
+
+In Google Cloud Console:
+
+1. Create or select a project and enable **Gmail API** and **Google Calendar API**.
+2. Configure the OAuth consent screen as an external testing app and add the same Google account used in `ULTRON_ALLOWED_EMAIL` to the test users.
+3. Create an OAuth Client ID of type **Web application**.
+4. Add this local authorized redirect URI: `http://localhost:3000/api/auth/callback/google`.
+5. Put the client ID and client secret in `.env.local` as `AUTH_GOOGLE_ID` and `AUTH_GOOGLE_SECRET`.
+
+For the hosted site, add the production redirect URI `https://ultron-personal.netlify.app/api/auth/callback/google` to that same Google OAuth client. Put the Google client ID/secret, `NEXTAUTH_SECRET`, `ULTRON_ALLOWED_EMAIL`, `NEXTAUTH_URL`, and `GEMINI_API_KEY` into Netlify's site environment settings as secrets. Set hosted `NEXTAUTH_URL` to `https://ultron-personal.netlify.app`.
+
+The requested OAuth scopes are `gmail.readonly`, `gmail.send`, and `calendar.events.owned`. ULTRON only exposes search, send, event listing, and event creation; it does not expose message deletion or event deletion. See Google's [OAuth web-server flow](https://developers.google.com/identity/protocols/oauth2/web-server), [Gmail scopes](https://developers.google.com/workspace/gmail/api/auth/scopes), and [Calendar scopes](https://developers.google.com/workspace/calendar/api/auth).
+
+The local migration script applies the files in `db/migrations/`:
 
 ```bash
 npm run db:migrate
 ```
 
-Keep the local PostgreSQL server on `localhost`; do not expose port 5432 to the public internet. For multi-device sync, deploy a protected ULTRON backend with authentication and a hosted PostgreSQL database.
+For Netlify, the SQL files under `netlify/database/migrations/` create the hosted schema during deployment. Do not point `npm run db:migrate` at Netlify Database. The hosted database starts with a new schema; copy local memory rows only if you want them in the cloud. Keep local PostgreSQL bound to `localhost` and never expose port 5432 to the public internet.
 - **`app/api/docs/route.ts`** — Keyword search over project documentation.
 
 ## Updates in this build

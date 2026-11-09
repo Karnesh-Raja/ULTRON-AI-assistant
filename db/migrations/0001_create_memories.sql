@@ -14,7 +14,7 @@ CREATE INDEX IF NOT EXISTS ultron_memories_created_at_idx
 
 CREATE INDEX IF NOT EXISTS ultron_memories_search_idx
   ON public.ultron_memories USING GIN (
-    to_tsvector('simple', content || ' ' || category || ' ' || array_to_string(tags, ' '))
+    to_tsvector('simple'::regconfig, content)
   );
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.ultron_memories TO ultron_app;

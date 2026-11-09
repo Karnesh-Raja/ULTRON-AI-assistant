@@ -109,7 +109,7 @@ export function popExpiredTimers(s: KVStore, nowMs: number): TimerItem[] {
 
 /* ───────────── result types ───────────── */
 
-export type PanelId = "chat" | "tasks" | "docs" | "memory" | "study" | "chess";
+export type PanelId = "chat" | "tasks" | "docs" | "memory" | "integrations" | "study" | "chess";
 
 export type AssistantAction =
   | { type: "open"; url: string; label: string }
@@ -280,9 +280,9 @@ export function runLocalCommand(input: string, ctx: CommandContext): AssistantRe
   }
 
   /* panels */
-  if ((m = n.match(/^(?:switch to|go to|show|open) (?:the |my )?(chat|conversation|history|docs|documentation|memory|memories)(?: panel| tab)?$/))) {
-    const panel: PanelId = /docs|documentation/.test(m[1]) ? "docs" : /memories?/.test(m[1]) ? "memory" : "chat";
-    const label = panel === "docs" ? "documentation" : panel === "memory" ? "saved memories" : "conversation";
+  if ((m = n.match(/^(?:switch to|go to|show|open) (?:the |my )?(chat|conversation|history|docs|documentation|memory|memories|integrations|connections)(?: panel| tab)?$/))) {
+    const panel: PanelId = /docs|documentation/.test(m[1]) ? "docs" : /memories?/.test(m[1]) ? "memory" : /integrations|connections/.test(m[1]) ? "integrations" : "chat";
+    const label = panel === "docs" ? "documentation" : panel === "memory" ? "saved memories" : panel === "integrations" ? "connected apps" : "conversation";
     return done(`Showing ${label}.`, { type: "panel", panel });
   }
 

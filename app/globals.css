@@ -394,6 +394,10 @@ body {
 @media (max-width: 600px) {
   .voice-panel { top: 64px; right: 12px; width: calc(100vw - 24px); }
   .hud-controls { right: 12px; bottom: 12px; }
+  .action-approval { padding: 14px; }
+  .action-approval-buttons { display: grid; grid-template-columns: 1fr; }
+  .action-approval-buttons .hud-btn { min-height: 38px; }
+  .signin-card { padding: 24px 18px; }
 }
 
 /* ——— Panels, tabs, chat, tasks, docs ——— */
@@ -454,6 +458,27 @@ body {
 .memory-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .memory-tags span { padding: 2px 5px; border: 1px solid rgba(255, 170, 48, 0.2); border-radius: 10px; color: rgba(255, 224, 173, 0.72); font: 9px Arial, sans-serif; }
 .memory-delete { position: absolute; right: 8px; bottom: 7px; height: 22px; }
+.integration-panel { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+.integration-account { display: grid; gap: 4px; width: 100%; padding: 9px; border: 1px solid rgba(255, 170, 48, 0.24); background: rgba(20, 10, 0, 0.34); }
+.integration-account span { color: rgba(255, 204, 102, 0.68); font-size: 9px; letter-spacing: 0.15em; }
+.integration-account strong { color: #fff2dc; font: 12px Arial, sans-serif; overflow-wrap: anywhere; }
+.integration-account small { color: rgba(255, 224, 173, 0.62); font: 10px Arial, sans-serif; }
+.integration-signout { align-self: flex-start; }
+.action-approval-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, 0.78); backdrop-filter: blur(8px); }
+.action-approval { width: min(560px, 100%); max-height: min(80vh, 720px); display: flex; flex-direction: column; gap: 12px; padding: 18px; overflow: hidden; border: 1px solid rgba(255, 170, 48, 0.56); border-radius: 6px; background: #080604; box-shadow: 0 0 40px rgba(255, 140, 20, 0.16); color: #fff2dc; }
+.action-approval-note { color: rgba(255, 224, 173, 0.72); font: 12px/1.5 Arial, sans-serif; }
+.action-approval-details { max-height: 45vh; overflow: auto; padding: 10px; border: 1px solid rgba(255, 170, 48, 0.18); color: #f4e8d5; background: rgba(20, 10, 0, 0.42); font: 12px/1.5 Arial, sans-serif; white-space: pre-wrap; overflow-wrap: anywhere; }
+.action-approval-buttons { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.action-approve { border-color: rgba(255, 170, 48, 0.7); color: #fff0cf; }
+.signin-screen { position: fixed; inset: 0; z-index: 120; display: grid; place-items: center; overflow: auto; padding: 24px; color: #fff2dc; background: radial-gradient(ellipse at 50% 30%, rgba(255, 153, 45, 0.12), transparent 58%), #030303; font-family: "Courier New", monospace; }
+.signin-card { width: min(440px, 100%); display: flex; flex-direction: column; align-items: center; gap: 14px; padding: 30px 24px; border: 1px solid rgba(255, 170, 48, 0.3); border-radius: 8px; background: rgba(8, 7, 5, 0.92); box-shadow: 0 0 36px rgba(255, 140, 20, 0.1); text-align: center; }
+.signin-mark { display: grid; place-items: center; width: 58px; height: 58px; border: 1px solid #ffad32; border-radius: 50%; color: #ffca75; font-size: 25px; box-shadow: 0 0 22px rgba(255, 170, 48, 0.22); }
+.signin-eyebrow { color: rgba(255, 204, 102, 0.72); font-size: 9px; letter-spacing: 0.22em; }
+.signin-card h1 { color: #ffe3b0; font-size: 22px; letter-spacing: 0.24em; }
+.signin-copy { color: rgba(255, 224, 173, 0.76); font: 14px/1.5 Arial, sans-serif; }
+.signin-button { min-height: 42px; padding: 0 16px; border: 1px solid rgba(255, 170, 48, 0.55); border-radius: 4px; color: #fff0cf; background: rgba(255, 170, 48, 0.12); font: 11px "Courier New", monospace; letter-spacing: 0.1em; cursor: pointer; }
+.signin-button:hover { background: rgba(255, 170, 48, 0.22); }
+.signin-privacy { color: rgba(255, 224, 173, 0.54); font: 11px/1.55 Arial, sans-serif; }
 .msg { display: flex; gap: 8px; margin-bottom: 8px; }
 .msg-who {
   flex: none;

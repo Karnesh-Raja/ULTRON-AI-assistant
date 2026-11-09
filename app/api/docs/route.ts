@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getSignedInEmail } from "@/lib/server/session";
 import { promises as fs } from "fs";
 import path from "path";
 
@@ -113,6 +114,7 @@ function snippetFor(text: string, terms: string[]): string {
 }
 
 export async function GET(request: Request) {
+  if (!await getSignedInEmail()) return NextResponse.json({ error: "Sign in to use ULTRON." }, { status: 401 });
   const query = new URL(request.url).searchParams.get("q")?.trim().slice(0, 200) ?? "";
   const { chunks, files } = await buildIndex();
 

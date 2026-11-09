@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { getConnectionString } from "@netlify/database";
 
 type DatabaseGlobal = typeof globalThis & { ultronPgPool?: Pool };
 
@@ -7,12 +8,11 @@ export function getDatabasePool(): Pool {
   const globalWithPool = globalThis as DatabaseGlobal;
   if (globalWithPool.ultronPgPool) return globalWithPool.ultronPgPool;
 
-  const connectionString = process.env.DATABASE_URL;
-  if (!connectionString) throw new Error("DATABASE_URL is not configured.");
+  const connectionString = process.env.DATABASE_URL || getConnectionString();
 
   const pool = new Pool({
     connectionString,
-    max: 4,
+    max: process.env.NETLIFY ? 1 : 4,
     connectionTimeoutMillis: 5_000,
     idleTimeoutMillis: 30_000,
   });
